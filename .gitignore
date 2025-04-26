@@ -47,8 +47,11 @@ Thumbs.db
 
 # Project specific
 temp_*.pdf
-*.index
-*.json
 outputs/
-data/
 node_modules/
+
+# Selectively include data files
+!data/scitldr_clean.csv
+!index/
+!index.json
+!index.index
