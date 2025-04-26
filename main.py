@@ -2,12 +2,14 @@ from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTa
 from fastapi.responses import JSONResponse, FileResponse
 from fastapi.middleware.cors import CORSMiddleware
 from typing import List, Optional
-import PyPDF2
 import io
 from src.rag_system import ResearchPaperRAG
 import os
-from src.visualizer import visualize_section
 import uuid
+from src.pdf_extractor import extract_sections_from_pdf
+from src.rag_pipeline import simplify_section
+import asyncio
+import time
 
 app = FastAPI()
 
@@ -21,85 +23,144 @@ app.add_middleware(
 )
 
 # In-memory store for documents and TLDRs
-# Structure: {document_id: {"filename": str, "sections": [{"title": str, "text": str}], "tldrs": [{"status": str, "tldr": str or None}]}}
+# Structure: {document_id: {"filename": str, "sections": {section_name: section_text}, "images": [], "tldrs": {}, "processing_status": str}}
 documents = {}
 
 # Initialize RAG system (use a temp index for uploaded paper)
-rag = ResearchPaperRAG("uploaded_paper_index")
+rag = ResearchPaperRAG("index")  # Use the main index with scitldr data
 
 @app.post("/upload_pdf")
-async def upload_pdf(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
+async def upload_file(file: UploadFile = File(...), background_tasks: BackgroundTasks = None):
     """Upload a PDF, extract sections, and start async TLDR generation."""
     if not file.filename.lower().endswith(".pdf"):
         raise HTTPException(status_code=400, detail="Only PDF files are supported.")
     try:
-        pdf_bytes = await file.read()
-        pdf_reader = PyPDF2.PdfReader(io.BytesIO(pdf_bytes))
-        full_text = ""
-        for page in pdf_reader.pages:
-            full_text += page.extract_text() or ""
-        # Naive section split: split by double newlines or 'Section' keyword
-        import re
-        raw_sections = re.split(r"\n\n+|(?i)section ", full_text)
-        sections = []
-        for i, sec in enumerate(raw_sections):
-            sec = sec.strip()
-            if not sec:
-                continue
-            title = f"Section {i+1}"
-            # Try to extract a title from the first line
-            first_line = sec.split("\n", 1)[0]
-            if len(first_line) < 80:
-                title = first_line.strip()
-            sections.append({"title": title, "text": sec})
-        document_id = str(uuid.uuid4())
-        documents[document_id] = {
-            "filename": file.filename,
-            "sections": sections,
-            "tldrs": [{"status": "pending", "tldr": None} for _ in sections]
-        }
-        # Start TLDR generation in the background
-        if background_tasks is not None:
-            background_tasks.add_task(generate_tldrs_background, document_id)
-        return {
-            "document_id": document_id,
-            "sections": [
-                {"title": sec["title"], "index": i, "preview": sec["text"][:100]}
-                for i, sec in enumerate(sections)
+        # Read file content
+        content = await file.read()
+        
+        # Save to a temporary file since pdf_extractor expects a file path
+        temp_path = f"temp_{uuid.uuid4()}.pdf"
+        with open(temp_path, "wb") as f:
+            f.write(content)
+        
+        try:
+            # Extract sections and images using the robust extractor
+            sections_dict, images = extract_sections_from_pdf(temp_path)
+            
+            # Convert sections dict to list format
+            sections = [
+                {
+                    "title": title,
+                    "text": text,
+                    "word_count": len(text.split())
+                }
+                for title, text in sections_dict.items()
             ]
-        }
+            
+            # Generate document ID
+            doc_id = str(uuid.uuid4())
+            
+            # Store sections and prepare for TLDR generation
+            documents[doc_id] = {
+                "filename": file.filename,
+                "sections": sections,
+                "images": images,
+                "tldrs": {},
+                "processing_status": "processing"
+            }
+            
+            # Start background TLDR generation
+            if background_tasks is not None:
+                background_tasks.add_task(generate_tldrs_for_document, doc_id)
+            
+            # Return in the standardized format
+            return {
+                "document_id": doc_id,
+                "filename": file.filename,
+                "total_sections": len(sections),
+                "sections": [
+                    {
+                        "index": i,
+                        "title": section["title"],
+                        "text": section["text"],
+                        "word_count": section["word_count"],
+                        "preview": section["text"][:200] + "..." if len(section["text"]) > 200 else section["text"]
+                    }
+                    for i, section in enumerate(sections)
+                ]
+            }
+        finally:
+            # Clean up temporary file
+            if os.path.exists(temp_path):
+                os.remove(temp_path)
+                
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
 
-def generate_tldrs_background(document_id: str):
-    """Background task to generate TLDRs for all sections."""
-    from src.rag_system import ResearchPaperRAG
-    rag = ResearchPaperRAG("uploaded_paper_index")
-    doc = documents[document_id]
-    rag.papers = []
-    rag.stored_data = []
-    rag.index.reset()
-    for i, section in enumerate(doc["sections"]):
-        try:
-            rag.add_to_index(section["text"], {"type": "section", "title": section["title"]})
-            tldr = rag.generate_tldr(section["text"])
-            doc["tldrs"][i]["status"] = "ready"
-            doc["tldrs"][i]["tldr"] = tldr
-        except Exception as e:
-            doc["tldrs"][i]["status"] = "error"
-            doc["tldrs"][i]["tldr"] = str(e)
+async def generate_tldrs_for_document(doc_id: str):
+    try:
+        doc = documents[doc_id]
+        sections = doc["sections"]
+        
+        for section in sections:
+            try:
+                # Use the RAG-based TLDR generation
+                tldr = rag.generate_tldr(section["text"])
+                doc["tldrs"][section["title"]] = {
+                    "content": tldr,
+                    "status": "completed"
+                }
+            except Exception as e:
+                doc["tldrs"][section["title"]] = {
+                    "content": str(e),
+                    "status": "error"
+                }
+                
+        doc["processing_status"] = "completed"
+    except Exception as e:
+        documents[doc_id]["processing_status"] = "error"
+        print(f"Error generating TLDRs for document {doc_id}: {str(e)}")
 
 @app.get("/tldr")
-async def get_tldrs(document_id: str):
-    """Poll for TLDRs for all sections of a document."""
+async def get_tldr(document_id: str, wait: bool = True):
+    """Get TLDR for a document with optional wait for processing."""
     if document_id not in documents:
-        raise HTTPException(status_code=404, detail="Document not found.")
+        raise HTTPException(status_code=404, detail="Document not found")
+    
     doc = documents[document_id]
+    
+    # If wait is True, wait for processing to complete
+    if wait:
+        timeout = 60  # 60 second timeout
+        start_time = time.time()
+        while doc["processing_status"] == "processing":
+            if time.time() - start_time > timeout:
+                raise HTTPException(status_code=408, detail="TLDR generation timeout")
+            await asyncio.sleep(1)
+    
+    # Combine sections and their TLDRs into a single response
+    sections_with_tldr = []
+    for section in doc["sections"]:
+        title = section["title"]
+        tldr_info = doc["tldrs"].get(title, {
+            "content": None,
+            "status": "pending" if doc["processing_status"] == "processing" else "error"
+        })
+        
+        sections_with_tldr.append({
+            "title": title,
+            "content": section["text"],
+            "word_count": section["word_count"],
+            "tldr": tldr_info["content"],
+            "status": tldr_info["status"]
+        })
+
     return {
-        "tldrs": [
-            {"title": sec["title"], "status": tldr["status"], "tldr": tldr["tldr"]}
-            for sec, tldr in zip(doc["sections"], doc["tldrs"])
-        ]
+        "document_id": document_id,
+        "filename": doc["filename"],
+        "processing_status": doc["processing_status"],
+        "total_sections": len(doc["sections"]),
+        "sections": sections_with_tldr
     }
 
 @app.post("/qna")
@@ -107,49 +168,30 @@ async def ask_question(document_id: str = Form(...), question: str = Form(...)):
     """Ask a question about the uploaded paper."""
     if document_id not in documents:
         raise HTTPException(status_code=404, detail="Document not found.")
+    
     doc = documents[document_id]
-    # Ensure the RAG index is up to date with the current sections
-    rag.papers = []
-    rag.stored_data = []
-    rag.index.reset()
-    for section in doc["sections"]:
-        rag.add_to_index(section["text"], {"type": "section", "title": section["title"]})
-    # Build context as a dict: {title: text}
+    
+    # Build context from the paper sections
     context = {section["title"]: section["text"] for section in doc["sections"]}
-    answer = rag.answer_question(question, context)
-    return {"answer": answer}
-
-@app.get("/visualize")
-async def get_visualization(document_id: str, section_title: Optional[str] = None):
-    """Get a visualization for a section."""
-    if document_id not in documents:
-        raise HTTPException(status_code=404, detail="Document not found.")
-    doc = documents[document_id]
-    # Find the section by title (default to first section if not specified)
-    section = None
-    if section_title:
-        for sec in doc["sections"]:
-            if sec["title"] == section_title:
-                section = sec
-                break
-    if not section:
-        section = doc["sections"][0]
-    # Generate visualization
-    image_path = visualize_section(section["title"], section["text"])
-    if not image_path or not os.path.exists(image_path):
-        raise HTTPException(status_code=500, detail="Failed to generate visualization.")
-    # Return the image file
-    return FileResponse(image_path, media_type="image/png")
-
-@app.get("/sections")
-async def get_sections(document_id: str):
-    """Get a list of all section titles in the uploaded PDF."""
-    if document_id not in documents:
-        raise HTTPException(status_code=404, detail="Document not found.")
-    doc = documents[document_id]
-    return {
-        "sections": [
-            {"title": sec["title"], "index": i, "preview": sec["text"][:100]}
-            for i, sec in enumerate(doc["sections"])
-        ]
-    }
+    
+    try:
+        # Get answer using the RAG system
+        answer = rag.answer_question(question, context)
+        
+        # Get relevant research context
+        relevant_context = rag.get_relevant_context(question, k=3)
+        
+        # Return both the answer and relevant context
+        return {
+            "answer": answer,
+            "relevant_context": relevant_context,
+            "status": "success"
+        }
+        
+    except Exception as e:
+        return {
+            "answer": "I apologize, but I encountered an error while processing your question. Please try rephrasing it.",
+            "relevant_context": "",
+            "status": "error",
+            "error": str(e)
+        }

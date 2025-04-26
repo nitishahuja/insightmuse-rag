@@ -7,8 +7,10 @@ import faiss
 import pickle
 from sentence_transformers import SentenceTransformer
 from typing import List
-import openai
-openai.api_key = os.getenv("OPENAI_API_KEY")
+from openai import OpenAI
+
+# Initialize OpenAI client
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Load everything once
 EMBEDDING_MODEL = SentenceTransformer("all-MiniLM-L6-v2")
@@ -36,7 +38,7 @@ Explain the following abstract in very simple, clear language with key takeaways
 Abstract:
 \"\"\"{abstract}\"\"\"
 """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.6,
@@ -54,7 +56,7 @@ Section Title: {title}
 Content:
 \"\"\"{content}\"\"\"
 """
-    response = openai.ChatCompletion.create(
+    response = client.chat.completions.create(
         model=model,
         messages=[{"role": "user", "content": prompt}],
         temperature=0.5,

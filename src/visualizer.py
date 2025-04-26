@@ -17,7 +17,7 @@ from pathlib import Path
 load_dotenv()
 
 # Initialize OpenAI client
-client = OpenAI()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # Configure logging
 logging.basicConfig(
@@ -36,119 +36,44 @@ Analyze the following research paper section and create a detailed visualization
 Title: {title}
 Content: {content}
 
-First, analyze the content to understand:
-1. The main concepts and their relationships
-2. Any numerical data or comparisons
-3. The flow of information or process steps
-4. Key findings or results
-5. Important patterns or trends
+Provide a structured JSON response with:
+1. The best visualization type (flowchart, bar_chart, pie_chart, timeline, or concept_map)
+2. Key elements to visualize
+3. Relationships or hierarchy between elements
+4. Any numerical data found
+5. Reasoning for the chosen visualization type
 
-Then, create a comprehensive visualization plan that includes:
-1. The most appropriate visualization type
-2. Detailed data extraction
-3. Clear labeling and annotations
-4. Meaningful color schemes
-5. Proper scaling and layout
-
-Return a JSON object with the following structure:
+Response format:
 {{
-    "visualization_type": "flowchart" | "bar_chart" | "line_chart" | "pie_chart" | "process_diagram" | 
-                         "scatter_plot" | "box_plot" | "heatmap" | "concept_map" | "hierarchical_tree" | 
-                         "venn_diagram" | "radar_chart",
-    "title": "descriptive title that captures the main insight",
-    "data": {{
-        "labels": ["label1", "label2"],
-        "values": [1, 2],
-        "annotations": ["insight1", "insight2"],
-        "units": "units",
-        "baseline": 0,
-        "highlight_slices": [0, 1],
-        "total": 100,
-        "steps": ["step1", "step2"],
-        "decision_points": ["decision1", "decision2"],
-        "branches": [["condition1", "outcome1"]],
-        "feedback_loops": [["step1", "step2"]],
-        "x_values": [1, 2],
-        "y_values": [1, 2],
-        "clusters": [{{"points": [0, 1], "label": "cluster1"}}],
-        "trend_lines": [{{"type": "linear", "degree": 1}}],
-        "outliers": [{{"group": 0, "value": 10}}],
-        "statistics": ["mean", "median"],
-        "highlight_cells": [{{"row": 0, "col": 0}}],
-        "color_range": {{"min": 0, "max": 100}},
-        "nodes": ["node1", "node2"],
-        "connections": [["node1", "node2", "relation"]],
-        "hierarchies": [["parent", "child"]],
-        "key_concepts": ["concept1", "concept2"],
-        "levels": [["root"], ["level1"]],
-        "leaf_nodes": ["leaf1", "leaf2"],
-        "sets": [{{"name": "set1", "elements": ["elem1"]}}],
-        "intersections": [{{"sets": ["set1", "set2"], "elements": ["elem1"]}}],
-        "unique_elements": [{{"set": "set1", "elements": ["elem1"]}}],
-        "ranges": [{{"min": 0, "max": 100}}]
-    }},
-    "description": "detailed explanation of what the visualization shows and its significance",
-    "style": {{
-        "color_scheme": "academic",
-        "font_size": 20,
-        "show_legend": true,
-        "show_grid": true,
-        "annotations": {{
-            "show_values": true,
-            "show_percentages": true,
-            "show_trends": true,
-            "highlight_key_points": true
-        }},
-        "layout": {{
-            "orientation": "vertical",
-            "spacing": 1.0,
-            "margins": {{"top": 0.1, "right": 0.1, "bottom": 0.1, "left": 0.1}},
-            "aspect_ratio": 1.5
-        }}
-    }}
+    "viz_type": "type_here",
+    "elements": ["element1", "element2"],
+    "relationships": [["element1", "element2", "relationship"]],
+    "numerical_data": {{"label1": value1}},
+    "reasoning": "explanation_here"
 }}
 """
-    response = client.chat.completions.create(
-        model="gpt-3.5-turbo",
-        messages=[
-            {"role": "system", "content": "You are a helpful research assistant that analyzes academic content and suggests appropriate visualizations."},
-            {"role": "user", "content": prompt}
-        ],
-        temperature=0.3,
-    )
+
     try:
-        return json.loads(response.choices[0].message.content)
-    except json.JSONDecodeError:
-        # If JSON parsing fails, return a default flowchart visualization
-        return {
-            "visualization_type": "flowchart",
-            "title": title,
-            "data": {
-                "steps": [content],
-                "decision_points": [],
-                "branches": [],
-                "feedback_loops": []
-            },
-            "description": "Default flowchart visualization",
-            "style": {
-                "color_scheme": "academic",
-                "font_size": 20,
-                "show_legend": True,
-                "show_grid": True,
-                "annotations": {
-                    "show_values": True,
-                    "show_percentages": True,
-                    "show_trends": True,
-                    "highlight_key_points": True
-                },
-                "layout": {
-                    "orientation": "vertical",
-                    "spacing": 1.0,
-                    "margins": {"top": 0.1, "right": 0.1, "bottom": 0.1, "left": 0.1},
-                    "aspect_ratio": 1.5
-                }
-            }
-        }
+        response = client.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are a visualization expert that analyzes research paper content and provides structured visualization plans."},
+                {"role": "user", "content": prompt}
+            ],
+            temperature=0.2
+        )
+        
+        # Parse the response
+        result = response.choices[0].message.content.strip()
+        try:
+            return json.loads(result)
+        except json.JSONDecodeError:
+            logging.error(f"Failed to parse JSON from response: {result}")
+            return {"viz_type": "concept_map", "elements": [], "relationships": [], "numerical_data": {}}
+            
+    except Exception as e:
+        logging.error(f"Error in analyze_content_for_visualization: {str(e)}")
+        return {"viz_type": "concept_map", "elements": [], "relationships": [], "numerical_data": {}}
 
 def generate_flowchart(steps: List[str], title: str, style: Dict = None) -> str:
     """Generate a flowchart using matplotlib."""

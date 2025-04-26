@@ -1,25 +1,32 @@
 import os
-from openai import OpenAI
-from dotenv import load_dotenv
-from typing import List, Dict, Optional
+from typing import List, Dict
+import faiss
 import numpy as np
 from sentence_transformers import SentenceTransformer
-import faiss
-import json
 import logging
+from openai import OpenAI
+from dotenv import load_dotenv
+import json
 
 load_dotenv()
 
 # Initialize OpenAI client
-client = OpenAI()
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Configure logging
+logging.basicConfig(level=logging.INFO)
+logger = logging.getLogger(__name__)
 
 class ResearchPaperRAG:
     def __init__(self, index_path: str):
         self.index_path = index_path
-        self.model = SentenceTransformer('all-MiniLM-L6-v2')
-        self.index = None
-        self.papers = []
-        self.stored_data = []  # Store all indexed documents
+        self.encoder = SentenceTransformer('all-MiniLM-L6-v2')
+        self.papers = []  # Store uploaded papers
+        self.stored_data = []  # Store text and metadata
+        
+        # Initialize or load FAISS index
+        self.index = faiss.IndexFlatL2(384)  # 384 is the dimension of the embeddings
+        
         self.load_index()
 
     def load_index(self):
@@ -65,42 +72,43 @@ class ResearchPaperRAG:
             logging.error(f"Error saving index: {str(e)}")
             raise
 
-    def add_to_index(self, text: str, metadata: Dict):
-        """Add a document to the index with metadata."""
-        # Generate embedding for the text
-        embedding = self.model.encode([text])[0]
-        
-        # Add to FAISS index
-        self.index.add(np.array([embedding], dtype=np.float32))
-        
-        # Store document with metadata
-        doc = {
-            'text': text,
-            'metadata': metadata
-        }
-        self.papers.append(doc)
-        self.stored_data.append(doc)
-        
-        # Save the updated index
-        self.save_index()
-
-    def search_similar(self, query: str, k: int = 5) -> List[Dict]:
-        """Search for similar documents."""
-        if not self.papers:
-            logging.warning("No documents in the index. Returning empty list.")
-            return []
-        
-        # Generate embedding for the query
-        query_embedding = self.model.encode([query])[0]
-        
-        # Search in FAISS index
-        distances, indices = self.index.search(np.array([query_embedding], dtype=np.float32), k)
-        
-        # Return the most similar documents
+    def add_to_index(self, text: str, metadata: Dict = None) -> None:
+        """Add a piece of text and its metadata to the index."""
         try:
-            return [self.papers[idx] for idx in indices[0]]
-        except IndexError:
-            logging.error("Error accessing documents from index. Returning empty list.")
+            # Get embedding
+            embedding = self.encoder.encode([text])[0]
+            
+            # Add to index
+            self.index.add(np.array([embedding]).astype('float32'))
+            
+            # Store text and metadata
+            self.stored_data.append({
+                'text': text,
+                'metadata': metadata or {}
+            })
+            
+        except Exception as e:
+            logger.error(f"Error adding to index: {str(e)}")
+            
+    def search_similar(self, query: str, k: int = 3) -> List[Dict]:
+        """Search for similar documents."""
+        try:
+            # Get query embedding
+            query_embedding = self.encoder.encode([query])[0]
+            
+            # Search index
+            D, I = self.index.search(np.array([query_embedding]).astype('float32'), k)
+            
+            # Get results
+            results = []
+            for idx in I[0]:
+                if idx < len(self.stored_data):  # Ensure index is valid
+                    results.append(self.stored_data[idx])
+            
+            return results
+            
+        except Exception as e:
+            logger.error(f"Error searching index: {str(e)}")
             return []
 
     def generate_tldr(self, text: str) -> str:
