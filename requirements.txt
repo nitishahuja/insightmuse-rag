@@ -1,23 +1,18 @@
-datasets
-pandas==2.1.4
-sentence-transformers==2.5.1
-faiss-cpu==1.7.4
-openai==1.12.0
-python-dotenv==1.0.0
-graphviz==0.20.1
-streamlit==1.44.0
-PyMuPDF
-matplotlib==3.8.2
-Pillow==10.2.0
-opencv-python-headless
-seaborn==0.13.2
-numpy==1.26.3
-matplotlib-venn==0.11.10
-networkx==3.2.1
-nltk==3.9.1
-PyPDF2==3.0.1
-scikit-learn==1.4.0
-torch==2.1.2
-transformers==4.37.2
+# Core FastAPI dependencies
 fastapi==0.109.2
 uvicorn==0.27.1
+python-multipart  # For file uploads
+python-dotenv==1.0.0
+
+# RAG system dependencies
+openai==1.0.0  # Using stable version to avoid proxies issue
+faiss-cpu==1.7.4
+sentence-transformers==2.5.1
+numpy==1.26.3
+
+# PDF processing
+PyMuPDF==1.23.8
+PyPDF2==3.0.1
+
+# Optional visualization dependencies
+streamlit==1.44.0
