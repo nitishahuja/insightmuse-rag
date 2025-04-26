@@ -19,3 +19,5 @@ PyPDF2==3.0.1
 scikit-learn==1.4.0
 torch==2.1.2
 transformers==4.37.2
+fastapi==0.109.2
+uvicorn==0.27.1
