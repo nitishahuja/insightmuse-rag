@@ -8,8 +8,10 @@ import os
 import uuid
 from src.pdf_extractor import extract_sections_from_pdf
 from src.rag_pipeline import simplify_section
+from src.visualizer import visualize_section
 import asyncio
 import time
+import base64
 
 app = FastAPI()
 
@@ -82,9 +84,8 @@ async def upload_file(file: UploadFile = File(...), background_tasks: Background
                     {
                         "index": i,
                         "title": section["title"],
-                        "text": section["text"],
-                        "word_count": section["word_count"],
-                        "preview": section["text"][:200] + "..." if len(section["text"]) > 200 else section["text"]
+                        "text": section["text"][:200] + "..." if len(section["text"]) > 200 else section["text"],
+                        "word_count": section["word_count"]
                     }
                     for i, section in enumerate(sections)
                 ]
@@ -98,24 +99,38 @@ async def upload_file(file: UploadFile = File(...), background_tasks: Background
         raise HTTPException(status_code=500, detail=f"Failed to process PDF: {str(e)}")
 
 async def generate_tldrs_for_document(doc_id: str):
+    """Generate TLDRs and visualizations for each section of a document."""
     try:
         doc = documents[doc_id]
         sections = doc["sections"]
         
         for section in sections:
             try:
-                # Use the RAG-based TLDR generation
+                # Generate TLDR
                 tldr = rag.generate_tldr(section["text"])
+                
+                # Generate visualization based on section type
+                viz_path = visualize_section(section["title"], section["text"])
+                
+                # Convert visualization to base64 if it exists
+                visualization_data = None
+                if viz_path and os.path.exists(viz_path):
+                    with open(viz_path, "rb") as f:
+                        image_bytes = f.read()
+                        visualization_data = f"data:image/png;base64,{base64.b64encode(image_bytes).decode()}"
+                
                 doc["tldrs"][section["title"]] = {
                     "content": tldr,
-                    "status": "completed"
+                    "visualization": visualization_data,
+                    "status": "completed" if visualization_data else "error"
                 }
             except Exception as e:
                 doc["tldrs"][section["title"]] = {
                     "content": str(e),
+                    "visualization": None,
                     "status": "error"
                 }
-                
+        
         doc["processing_status"] = "completed"
     except Exception as e:
         documents[doc_id]["processing_status"] = "error"
@@ -123,13 +138,12 @@ async def generate_tldrs_for_document(doc_id: str):
 
 @app.get("/tldr")
 async def get_tldr(document_id: str, wait: bool = True):
-    """Get TLDR for a document with optional wait for processing."""
+    """Get TLDR and visualizations for a document with optional wait for processing."""
     if document_id not in documents:
         raise HTTPException(status_code=404, detail="Document not found")
     
     doc = documents[document_id]
     
-    # If wait is True, wait for processing to complete
     if wait:
         timeout = 60  # 60 second timeout
         start_time = time.time()
@@ -138,23 +152,33 @@ async def get_tldr(document_id: str, wait: bool = True):
                 raise HTTPException(status_code=408, detail="TLDR generation timeout")
             await asyncio.sleep(1)
     
-    # Combine sections and their TLDRs into a single response
     sections_with_tldr = []
     for section in doc["sections"]:
         title = section["title"]
         tldr_info = doc["tldrs"].get(title, {
             "content": None,
+            "visualization": None,
             "status": "pending" if doc["processing_status"] == "processing" else "error"
         })
         
+        # Determine section type for visualization
+        section_type = "other"
+        title_lower = title.lower()
+        if any(word in title_lower for word in ["method", "procedure", "approach", "implementation"]):
+            section_type = "methodology"
+        elif any(word in title_lower for word in ["result", "finding", "evaluation", "analysis"]):
+            section_type = "results"
+        elif any(word in title_lower for word in ["discussion", "conclusion", "summary"]):
+            section_type = "discussion"
+        
         sections_with_tldr.append({
             "title": title,
-            "content": section["text"],
-            "word_count": section["word_count"],
+            "section_type": section_type,
             "tldr": tldr_info["content"],
+            "visualization": tldr_info.get("visualization"),  # This will now be base64 encoded image data
             "status": tldr_info["status"]
         })
-
+    
     return {
         "document_id": document_id,
         "filename": doc["filename"],

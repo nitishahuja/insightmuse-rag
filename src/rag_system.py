@@ -77,28 +77,28 @@ class ResearchPaperRAG:
         try:
             # Get embedding
             embedding = self.encoder.encode([text])[0]
-            
+        
             # Add to index
             self.index.add(np.array([embedding]).astype('float32'))
-            
+        
             # Store text and metadata
             self.stored_data.append({
-                'text': text,
+            'text': text,
                 'metadata': metadata or {}
             })
             
         except Exception as e:
             logger.error(f"Error adding to index: {str(e)}")
-            
+
     def search_similar(self, query: str, k: int = 3) -> List[Dict]:
         """Search for similar documents."""
         try:
             # Get query embedding
             query_embedding = self.encoder.encode([query])[0]
-            
+        
             # Search index
             D, I = self.index.search(np.array([query_embedding]).astype('float32'), k)
-            
+        
             # Get results
             results = []
             for idx in I[0]:
@@ -111,8 +111,8 @@ class ResearchPaperRAG:
             logger.error(f"Error searching index: {str(e)}")
             return []
 
-    def generate_tldr(self, text: str) -> str:
-        """Generate a TLDR summary of the text using the pre-trained knowledge."""
+    def generate_tldr(self, text: str) -> Dict:
+        """Generate a TLDR summary of the text using the pre-trained knowledge and suggest visualizations."""
         # First, find similar abstracts from scitldr
         similar_docs = self.search_similar(text, k=3)
         
@@ -122,28 +122,69 @@ class ResearchPaperRAG:
             if doc['metadata'].get('type') == 'tldr':
                 context += f"Example TLDR: {doc['text']}\n\n"
         
-        prompt = f"""
-        Based on these example TLDRs from similar research papers:
-        {context}
+        prompt = f"""Based on these example TLDRs from similar research papers:
+{context}
+
+Please provide a concise TLDR summary and visualization suggestion in the following format:
+
+{{
+    "tldr": "your concise summary here",
+    "visualization": {{
+        "viz_type": "NONE",  // Default choice, only change if visualization truly adds value
+        "explanation": "why visualization is not needed or how it would help",
+        "data": {{}}  // Only include if suggesting a visualization
+    }}
+}}
+
+Text to analyze:
+{text}
+
+IMPORTANT:
+- Keep the summary clear and concise
+- Default to NONE for visualization unless it truly adds value
+- Ensure the response is valid JSON
+"""
         
-        Please provide a concise TLDR summary of the following research paper section:
-        
-        {text}
-        
-        Focus on the key points and main findings. Keep it brief but informative.
-        """
-        
-        response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are a helpful research assistant that provides clear and concise summaries of academic papers."},
-                {"role": "user", "content": prompt}
-            ],
-            temperature=0.3,
-            max_tokens=150
-        )
-        
-        return response.choices[0].message.content.strip()
+        try:
+            response = client.chat.completions.create(
+                model="gpt-3.5-turbo",
+                messages=[
+                    {"role": "system", "content": "You are a research assistant that provides clear summaries and ONLY suggests visualizations when they truly add value. Always respond with valid JSON."},
+                    {"role": "user", "content": prompt}
+                ],
+                temperature=0.3,
+                max_tokens=500
+            )
+            
+            try:
+                result = json.loads(response.choices[0].message.content.strip())
+                return {
+                    "tldr": result.get("tldr", "Error parsing summary"),
+                    "visualization": result.get("visualization", {
+                        "viz_type": "NONE",
+                        "explanation": "Error parsing visualization data"
+                    })
+                }
+            except json.JSONDecodeError as e:
+                logging.error(f"JSON parsing error: {str(e)}")
+                logging.error(f"Raw response: {response.choices[0].message.content}")
+                return {
+                    "tldr": response.choices[0].message.content.strip(),
+                    "visualization": {
+                        "viz_type": "NONE",
+                        "explanation": "Error parsing response as JSON"
+                    }
+                }
+            
+        except Exception as e:
+            logging.error(f"Error in generate_tldr: {str(e)}")
+            return {
+                "tldr": "Error generating summary",
+                "visualization": {
+                    "viz_type": "NONE",
+                    "explanation": f"Error in analysis: {str(e)}"
+                }
+            }
 
     def answer_question(self, question: str, context: Dict[str, str]) -> str:
         """Answer a question about the research paper."""

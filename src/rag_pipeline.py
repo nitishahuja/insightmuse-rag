@@ -1,5 +1,6 @@
 import os
 from dotenv import load_dotenv
+import json
 
 load_dotenv()  # loads from .env file in project root
 
@@ -47,7 +48,19 @@ Abstract:
 
 
 # 🧠 NEW: Simplify a specific section of a paper (e.g., Methods, Results, etc.)
-def simplify_section(title: str, content: str, model="gpt-3.5-turbo") -> str:
+def simplify_section(title: str, content: str, model="gpt-3.5-turbo") -> dict:
+    """Simplify a section and get visualization suggestion."""
+    # First get the simplified content
+    simplified = simplify_section_content(title, content, model)
+    
+    return {
+        "title": title,
+        "simplified_content": simplified
+    }
+
+
+def simplify_section_content(title: str, content: str, model="gpt-3.5-turbo") -> str:
+    """Simplify the content of a section."""
     prompt = f"""
 You are a helpful research assistant. Simplify the following research paper section titled '{title}' in clear and accessible language. Use concise points, short paragraphs, and highlight the core purpose or steps taken in that section.
 
