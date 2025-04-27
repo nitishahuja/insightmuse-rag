@@ -10,7 +10,7 @@ InsightMuse RAG is an advanced research paper analysis system that combines Retr
 
    - Uses FAISS for vector similarity search
    - Implements sentence-transformer embeddings (all-MiniLM-L6-v2)
-   - Integrates with OpenAI's GPT-3.5-turbo for generation
+   - Integrates with OpenAI's gpt-4o-mini for generation
    - Features:
      - TLDR generation with context-aware prompting
      - Question answering with relevant context retrieval
@@ -174,7 +174,7 @@ def search_similar(self, query: str, k: int = 3) -> List[Dict]:
 
 ### OpenAI Settings
 
-- Model: gpt-3.5-turbo
+- Model: gpt-4o-mini
 - Temperature: 0.3 (for consistent outputs)
 - Max tokens: 150 (TLDR), 500 (QA)
 

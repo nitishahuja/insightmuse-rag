@@ -31,7 +31,7 @@ def search_top_k(query: str, k=5) -> List[dict]:
     return results
 
 
-def simplify_with_prompt(abstract: str, model="gpt-3.5-turbo") -> str:
+def simplify_with_prompt(abstract: str, model="gpt-4o-mini") -> str:
     prompt = f"""
 You are a research assistant who simplifies complex research abstracts for graduate students.
 Explain the following abstract in very simple, clear language with key takeaways in bullet points.
@@ -48,7 +48,7 @@ Abstract:
 
 
 # 🧠 NEW: Simplify a specific section of a paper (e.g., Methods, Results, etc.)
-def simplify_section(title: str, content: str, model="gpt-3.5-turbo") -> dict:
+def simplify_section(title: str, content: str, model="gpt-4o-mini") -> dict:
     """Simplify a section and get visualization suggestion."""
     # First get the simplified content
     simplified = simplify_section_content(title, content, model)
@@ -59,7 +59,7 @@ def simplify_section(title: str, content: str, model="gpt-3.5-turbo") -> dict:
     }
 
 
-def simplify_section_content(title: str, content: str, model="gpt-3.5-turbo") -> str:
+def simplify_section_content(title: str, content: str, model="gpt-4o-mini") -> str:
     """Simplify the content of a section."""
     prompt = f"""
 You are a helpful research assistant. Simplify the following research paper section titled '{title}' in clear and accessible language. Use concise points, short paragraphs, and highlight the core purpose or steps taken in that section.

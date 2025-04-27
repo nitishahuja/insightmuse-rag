@@ -147,7 +147,7 @@ IMPORTANT:
         
         try:
             response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a research assistant that provides clear summaries and ONLY suggests visualizations when they truly add value. Always respond with valid JSON."},
                     {"role": "user", "content": prompt}
@@ -234,7 +234,7 @@ IMPORTANT:
         
         try:
             response = client.chat.completions.create(
-                model="gpt-3.5-turbo",
+                model="gpt-4o-mini",
                 messages=[
                     {"role": "system", "content": "You are a helpful research assistant that answers questions about academic papers. Always cite specific sections or findings from the paper when possible."},
                     {"role": "user", "content": prompt}

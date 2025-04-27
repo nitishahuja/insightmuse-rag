@@ -691,7 +691,7 @@ def analyze_results_for_visualization(text: str) -> Dict:
 
     try:
         response = client.chat.completions.create(
-            model="gpt-3.5-turbo",
+            model="gpt-4o-mini",
             messages=[
                 {"role": "system", "content": "You are a data visualization expert that extracts numerical insights from research results."},
                 {"role": "user", "content": prompt}
